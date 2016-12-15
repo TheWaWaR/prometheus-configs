@@ -73,7 +73,7 @@ def alert_webhook():
     payload = json.loads(request.data)
     title = u'[告警]: {}'.format(payload['groupLabels']['alertname'])
     alerts = [
-        '<li>[<strong>状态={}</strong>] : <strong>{}</strong><small>({})</small></li>'.format(
+        '<li>[状态=<strong>{}</strong>] : <strong>{}</strong> <small>({})</small></li>'.format(
             item['status'],
             item['annotations']['summary'],
             item['annotations']['description']
