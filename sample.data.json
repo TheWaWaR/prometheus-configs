@@ -1,0 +1,12 @@
+{
+  "thresholds": {
+    "instance_down_interval": "4m"
+  },
+  "mail": {
+    "smtp_server": "smtp.example.com",
+    "smtp_port": "465",
+    "mail_from": "f@example.com",
+    "mail_to": "x@example.com",
+    "mail_passwd": "****"
+  }
+}

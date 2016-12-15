@@ -15,7 +15,7 @@ app = Flask(__name__)
 SMTP_TPL = "{key}: '{value}'"
 SMTP_KEYS = [
     'smtp_smarthost',
-    'smtp_from',
+    # 'smtp_from',
     'smtp_auth_username',
     'smtp_auth_password'
 ]
@@ -86,13 +86,13 @@ def alert_webhook():
 
 @app.route('/prometheus/alert/thresholds/', methods=['GET', 'POST'])
 def alert_thresholds():
-    with open(current_app.config['ARGS']['thresholds']) as f:
-        print(u'Read from <{}>'.format(current_app.config['ARGS']['thresholds']))
-        data = f.read()
+    with open(current_app.config['ARGS']['data']) as f:
+        print(u'Read from <{}>'.format(current_app.config['ARGS']['data']))
+        config_data = json.load(f)
+        thresholds = config_data['thresholds']
     if request.method == 'GET':
-        return data
+        return json.dumps(thresholds)
     elif request.method == 'POST':
-        thresholds = json.loads(data)
         new_thresholds = json.loads(request.data)
         for threshold in new_thresholds:
             alert_name = threshold['alert_name']
@@ -106,8 +106,8 @@ def alert_thresholds():
             open(lock_filename, 'a').close()
         with open(lock_filename) as lfd:
             fcntl.flock(lfd, fcntl.LOCK_EX)
-            with open(current_app.config['ARGS']['thresholds'], 'w') as f:
-                print(u'Write to <{}>'.format(current_app.config['ARGS']['thresholds']))
+            with open(current_app.config['ARGS']['data'], 'w') as f:
+                print(u'Write to <{}>'.format(current_app.config['ARGS']['data']))
                 json.dump(thresholds, f, indent=2)
             fcntl.flock(lfd, fcntl.LOCK_UN)
         return json.dumps(thresholds)
@@ -178,55 +178,58 @@ def parse_args():
                         default='prometheus.yml')
     parser.add_argument('-a', '--alertmanager', required=True,
                         default='alertmanager.yml')
-    parser.add_argument('-t', '--thresholds', required=True,
-                        default='thresholds.json',
-                        help='Alert thresholds file (.json)')
+    parser.add_argument('-d', '--data', required=True,
+                        default='data.json',
+                        help='Config data file (data.json)')
     parser.add_argument('-l', '--lockfile',
                         default='/tmp/prometheus-agent.lock')
-    parser.add_argument('--smtp-server', required=True)
-    parser.add_argument('--smtp-port', required=True)
-    parser.add_argument('--mail-from', required=True)
-    parser.add_argument('--mail-to', required=True)
-    parser.add_argument('--mail-passwd', required=True)
     parser.add_argument('-D', '--debug', default=False, action='store_true')
     args = parser.parse_args()
 
     directory = os.path.dirname(args.config)
     for path in [args.config,
-                 args.thresholds,
+                 args.data,
                  os.path.join(directory, 'alert.rules.tpl'),
                  os.path.join(directory, 'alertmanager.yml.tpl')]:
         if not os.path.exists(path):
             parser.error('File not exists: {0}'.format(path))
+    print(u'[Args]: {}'.format(args))
     return args
 
 
 def main():
     args = parse_args()
     directory = os.path.dirname(args.config)
-    with open(args.thresholds) as f:
-        print(u'Read from <{}>'.format(args.thresholds))
-        thresholds = json.load(f)
+
+    with open(args.data) as f:
+        print(u'Read from <{}>'.format(args.data))
+        config_data = json.load(f)
     with open(os.path.join(directory, 'alert.rules.tpl')) as fread:
         print(u'Read from <{}>'.format(os.path.join(directory, 'alert.rules.tpl')))
         rules_tmpl = fread.read()
-        rules = rules_tmpl % thresholds
+        rules = rules_tmpl % config_data['thresholds']
         rules_path = os.path.join(directory, 'alert.rules')
         with open(rules_path, 'w') as fwrite:
             print(u'Write to <{}>'.format(rules_path))
             fwrite.write(rules)
 
-    app.config['SMTP_SERVER'] = args.smtp_server
-    app.config['SMTP_PORT'] = args.smtp_port
-    app.config['MAIL_FROM'] = args.mail_from
-    app.config['MAIL_TO_DEFAULT'] = args.mail_to
-    app.config['MAIL_PASSWD'] = args.mail_passwd
+    config_email = config_data['email']
+    app.config['SMTP_SERVER'] = config_email['smtp_server']
+    app.config['SMTP_PORT'] = config_email['smtp_port']
+    app.config['MAIL_FROM'] = config_email['mail_from']
+    app.config['MAIL_TO_DEFAULT'] = config_email['mail_to']
+    app.config['MAIL_PASSWD'] = config_email['mail_passwd']
     app.config['ARGS'] = vars(args)
     mail = Email()
     mail.init_app(app)
     app.mail = mail
 
-    app.run(host=args.host, port=args.port, debug=args.debug)
+    if args.debug:
+        app.run(host=args.host, port=args.port, debug=True)
+    else:
+        from gevent.pywsgi import WSGIServer
+        http_server = WSGIServer((args.host, args.port), app)
+        http_server.serve_forever()
 
 
 if __name__ == '__main__':
