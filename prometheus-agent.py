@@ -2,10 +2,11 @@
 # coding: utf-8
 
 import os
-import sys
 import json
 import fcntl
 import argparse
+import smtplib
+from email.mime.text import MIMEText
 
 import yaml
 from flask import Flask, request, current_app
@@ -18,6 +19,60 @@ SMTP_KEYS = [
     'smtp_auth_username',
     'smtp_auth_password'
 ]
+
+
+class Email(object):
+
+    def __init__(self, smtp_server=None, smtp_port=None, smtp_ssl=True,
+                 frm=None, to=None, passwd=None):
+        self.smtp_server = smtp_server
+        self.smtp_port = smtp_port
+        self.smtp_ssl = smtp_ssl
+        self.frm = frm
+        self.to = to            # Default receiver
+        self.passwd = passwd
+
+    def init_app(self, app):
+        cfg = app.config
+        self.smtp_server = cfg['SMTP_SERVER']
+        self.smtp_port = cfg['SMTP_PORT']
+        self.smtp_ssl = cfg.get('SMTP_SSL', True)
+        self.frm = cfg['MAIL_FROM']
+        self.to = cfg['MAIL_TO_DEFAULT']
+        self.passwd = cfg['MAIL_PASSWD']
+
+    @property
+    def session(self):
+        Client = smtplib.SMTP_SSL if self.smtp_ssl else smtplib.SMTP
+        s = Client(self.smtp_server, self.smtp_port)
+        s.login(self.frm, self.passwd)
+        return s
+
+    def send(self, body, subject='[alertmanager]', type='plain', to=None):
+        if to is None:
+            to = self.to
+
+        msg = MIMEText(body, type, 'utf-8')
+        msg['subject'] = subject
+        msg['from'] = self.frm
+        msg['to'] = to
+
+        retry = 3
+        while retry > 0:
+            try:
+                self.session.sendmail(self.frm, to, msg.as_string())
+                return True
+            except smtplib.SMTPException as e:
+                print e
+                retry -= 1
+        return False
+
+
+@app.route('/prometheus/alert/webhook', methods=['POST'])
+def alert_webhook():
+    payload = json.loads(request.data)
+    current_app.mail.send(json.dumps(payload, indent=4))
+    return 'ok'
 
 
 @app.route('/prometheus/alert/thresholds/', methods=['GET', 'POST'])
@@ -119,6 +174,11 @@ def parse_args():
                         help='Alert thresholds file (.json)')
     parser.add_argument('-l', '--lockfile',
                         default='/tmp/prometheus-agent.lock')
+    parser.add_argument('--smtp-server', required=True)
+    parser.add_argument('--smtp-port', required=True)
+    parser.add_argument('--mail-from', required=True)
+    parser.add_argument('--mail-to', required=True)
+    parser.add_argument('--mail-passwd', required=True)
     parser.add_argument('-D', '--debug', default=False, action='store_true')
     args = parser.parse_args()
 
@@ -147,7 +207,16 @@ def main():
             print(u'Write to <{}>'.format(rules_path))
             fwrite.write(rules)
 
+    app.config['SMTP_SERVER'] = args.smtp_server
+    app.config['SMTP_PORT'] = args.smtp_port
+    app.config['MAIL_FROM'] = args.mail_from
+    app.config['MAIL_TO_DEFAULT'] = args.mail_to
+    app.config['MAIL_PASSWD'] = args.mail_passwd
     app.config['ARGS'] = vars(args)
+    mail = Email()
+    mail.init_app(app)
+    app.mail = mail
+
     app.run(host=args.host, port=args.port, debug=args.debug)
 
 
