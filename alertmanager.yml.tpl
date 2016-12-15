@@ -40,4 +40,4 @@ receivers:
   - to: '%(email_to)s'
 - name: 'webhook'
   webhook_configs:
-  - url: 'http://xxX'
+  - url: 'http://localhost:3030/prometheus/alert/webhook'
