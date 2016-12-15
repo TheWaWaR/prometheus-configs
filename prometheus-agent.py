@@ -71,7 +71,9 @@ class Email(object):
 @app.route('/prometheus/alert/webhook', methods=['POST'])
 def alert_webhook():
     payload = json.loads(request.data)
-    current_app.mail.send(json.dumps(payload, indent=4))
+    title = u'[告警]: {}'.format(payload['commonAnnotations']['summary'])
+    body = payload['commonAnnotations']['description']
+    current_app.mail.send(body, subject=title)
     return 'ok'
 
 
